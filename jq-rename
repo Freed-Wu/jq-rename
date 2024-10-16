@@ -1,0 +1,73 @@
+#!/usr/bin/env -S sh -c 'jq -L/usr/lib/jq -nrf "$0" --args -- "$0" "$@" | xargs -i{} sh -c "eval {}"'
+# https://github.com/jqlang/jq/issues/384
+# eval()
+include "jqjq";
+def _f:
+  .[0] as $a | if length == 0 then empty
+    elif $a == "-h" or $a == "--help"               then {help: true}, (.[1:] | _f)
+    elif $a == "-V" or $a == "--version"            then {version: true}, (.[1:] | _f)
+    elif $a == "-i" or $a == "--interactive"        then {interactive: true}, (.[1:] | _f)
+    elif $a == "-f" or $a == "--force"              then {interactive: false}, (.[1:] | _f)
+    elif $a == "-c" or $a == "--copy"               then {cmd: "cp"}, (.[1:] | _f)
+    elif $a == "-l" or $a == "--link-only"          then {cmd: "ln -s"}, (.[1:] | _f)
+    elif $a == "-n" or $a == "--just-print" or $a == "--dry-run"
+                                                    then {dry_run: true}, (.[1:] | _f)
+    elif $a == "-v" or $a == "--verbose"            then {verbose: true}, (.[1:] | _f)
+    elif $a == "-b" or $a == "--backup"             then {backup: true}, (.[1:] | _f)
+    elif $a == "-z" or $a == "-S" or $a == "--suffix"
+                                                    then {suffix: .[1]}, (.[2:] | _f)
+    elif $a == "--"                                 then {files: .[1:]}
+    elif $a | startswith("-")                       then error("unknown argument: \($a)")
+    else {files: .[0:]}
+    end;
+def _help:
+  "usage: \($ARGS.positional[0]) [OPTION]... [--] JQEXPR FILE...\n" +
+  "Rename FILE(s) using JQEXPR on each filename.\n" +
+  "\n" +
+  "options:\n" +
+  "  -b, --backup                 make backup before removal\n" +
+  "  -c, --copy                   show program's version number and exit\n" +
+  "  -f, --force                  remove existing destinations, never prompt\n" +
+  "  -i, --interactive            prompt before overwrite\n" +
+  "  -l, --link-only              link file instead of rename\n" +
+  "  -n, --just-print, --dry-run  don't rename, implies --verbose\n" +
+  "  -v, --verbose                explain what is being done\n" +
+  "  -z, -S, --suffix=SUFFIX      set backup filename suffix\n" +
+  "  -h, --help                   display this help and exit\n" +
+  "  -V, --version                output version information and exit\n";
+def _version:
+  "\($ARGS.positional[0]) 0.0.1\n" +
+  "Copyright (C) 2024\n" +
+  "Written by Wu Zhenyu <wuzhenyu@ustc.edu>\n";
+def _parse_args:
+  [{cmd: "mv"}, _f] | add |
+    if .help then
+       _help | halt_error(0)
+    elif .version then
+       _version | halt_error(0)
+    elif .files | length < 2 then
+       _help | halt_error(1)
+    else
+      .expr = .files[0] |
+      .files = .files[1:] |
+      if .interactive then
+        .cmd += " -i"
+      end |
+      if .backup then
+        .cmd += " -b"
+      end |
+      if .suffix then
+        .cmd += " -S \(.suffix)"
+      end |
+      if .dry_run then
+        .cmd = "echo " + .cmd
+      elif .verbose then
+        .cmd = "echo " + .cmd, .
+      end |
+      . as $args |
+      .files | map(eval($args.expr)) |
+      foreach .[] as $item (-1; . + 1; "\($args.cmd) \($args.files[.]) \($item)")
+    end;
+
+$ARGS.positional[1:] | _parse_args
+# ex: filetype=jq
